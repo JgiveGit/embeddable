@@ -104,7 +104,7 @@ cubes:
       - name: is_negative
         title: "Is negative"
         sql: is_negative
-        type: string
+        type: boolean
 
       - name: payout_id
         title: "Payout ID"
