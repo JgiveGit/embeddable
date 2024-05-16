@@ -1,9 +1,9 @@
-- name: Example customer 1
+- name: Foobar charity
   securityContext:
-    country: United States
+    charityOrganizationId: 11
   environment: default
-
-- name: Example customer 2
+    
+- name: Healthy food association
   securityContext:
-    country: Germany
+    charityOrganizationId: 527
   environment: default
