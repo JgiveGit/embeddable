@@ -1,0 +1,391 @@
+cubes:
+  - name: test
+    title: Test
+    data_source: staging-db
+
+    sql: |
+      (SELECT DISTINCT 
+        d.id AS donation_id,
+        t.id AS transfer_id,
+        d.created_at,
+        t.completed_at,
+        t.refunded_at,
+        d.amount_cents / 100 AS original_amount,
+        d.amount_currency as currency,
+        d.norm_amount_cents / 100 AS norm_amount,
+        ROUND((da.releasable_amount_cents / 100::FLOAT * (d.norm_amount_cents::FLOAT / d.amount_cents::FLOAT))::NUMERIC, 2) AS released_amount,
+        d.recurring,
+        'Online' AS donation_source,
+        CONCAT(d.id, '-online') AS unique_donation_id,
+        pm."name" AS payment_method,
+        pm.provider,
+        d2.email AS donor_email,
+        d2.full_name AS donor_name,
+        dt.id AS target_id,
+        CASE 
+            WHEN dt.main_event_id IS NOT NULL THEN met."name" 
+            ELSE dtt."name" 
+        END AS campaign_name,
+        dt.main_event_id,
+        coalesce(met.donation_target_id, dt.id) as campaign_id,
+        CASE 
+            WHEN dt.main_event_id IS NOT NULL THEN SPLIT_PART(dtt."name", '-', 1) 
+            ELSE NULL 
+        END AS shagrir_name,
+        dt.team_id,
+        team."name" AS team_name,
+        dt.charity_organization_id,
+        cot2."name" AS charity_name,
+        up."source" as utm_source, 
+        up.medium as utm_medium, 
+        up.campaign as utm_campaign,
+        case 
+        	when dt.managed_by_pro then 'Pro_Campaign'
+        	when dt.use_for_external_page then 'External_Page'
+        	when dt."type" = 'MainTarget' then 'Charity_Page'
+        	else 'Regular_Campaign' end as target_type
+      FROM donations d 
+      JOIN payable_items_transfers pit ON pit.payable_item_type = 'Donation' AND pit.payable_item_id = d.id 
+      JOIN transfers t ON pit.transfer_id = t.id 
+      JOIN donation_amounts da ON da.payable_item_id = pit.payable_item_id AND da.payable_item_type = 'Donation' and not da.is_refund
+      JOIN payment_methods pm ON t.payment_method_id = pm.id 
+      JOIN donors d2 ON d.donor_id = d2.id 
+      LEFT JOIN utm_parameters up on d.utm_parameter_id = up.id
+      JOIN donation_targets dt ON d.recipient_id = dt.id 
+      JOIN donation_target_translations dtt ON dtt.donation_target_id = dt.id AND dtt.locale = 'he'
+      LEFT JOIN donation_target_translations met ON met.donation_target_id = dt.main_event_id AND met.locale = 'he'
+      LEFT JOIN donation_target_translations team ON team.donation_target_id = dt.team_id AND team.locale = 'he'
+      JOIN charity_organization_translations cot2 ON cot2.charity_organization_id = dt.charity_organization_id AND cot2.locale = 'he'
+      WHERE t.completed_at IS NOT null
+      and t.refunded_at is null
+      AND dt.charity_organization_id = '{COMPILE_CONTEXT.securityContext.charityOrganizationId}'
+      )
+      UNION ALL
+      -- Second query for offline donations
+      (SELECT 
+        ad.id AS donation_id,
+        NULL AS transfer_id,
+        ad.created_at,
+        rd.completed_at,
+        NULL AS refunded_at,
+        rd.amount_cents / 100 AS original_amount,
+        rd.amount_currency as currency,
+        rd.normalized_amount_ils_cents / 100 AS norm_amount,
+        rd.normalized_amount_ils_cents / 100 AS released_amount,
+        FALSE AS recurring,
+        'Offline' AS donation_source,
+        CONCAT(ad.id, '-offline') AS unique_donation_id,
+        NULL AS payment_method,
+        NULL AS provider,
+        NULL AS donor_email,
+        TRIM(LOWER(rd.donor_name)) AS donor_name,
+        rd.donation_target_id AS target_id,
+        CASE 
+            WHEN dt.main_event_id IS NOT NULL THEN met."name" 
+            ELSE dtt."name" 
+        END AS campaign_name,
+        dt.main_event_id,
+        coalesce(met.donation_target_id, dt.id) as campaign_id,
+        CASE 
+            WHEN dt.main_event_id IS NOT NULL THEN SPLIT_PART(dtt."name", '-', 1) 
+            ELSE NULL 
+        END AS shagrir_name,
+        dt.team_id,
+        team."name" AS team_name,
+        dt.charity_organization_id,
+        cot2."name" AS charity_name,
+        NULL as utm_source, 
+        NULL as utm_medium, 
+        NULL as utm_campaign,
+        case 
+        	when dt.managed_by_pro then 'Pro_Campaign'
+        	when dt.use_for_external_page then 'External_Page'
+        	when dt."type" = 'MainTarget' then 'Charity_Page'
+        	else 'Regular_Campaign' end as target_type
+      FROM recent_donations rd 
+      JOIN additional_donations ad ON rd.source_type = 'AdditionalDonation' AND rd.source_id = ad.id 
+      JOIN donation_targets dt ON rd.donation_target_id = dt.id 
+      JOIN donation_target_translations dtt ON dtt.donation_target_id = dt.id AND dtt.locale = 'he'
+      LEFT JOIN donation_target_translations met ON met.donation_target_id = dt.main_event_id AND met.locale = 'he'
+      LEFT JOIN donation_target_translations team ON team.donation_target_id = dt.team_id AND team.locale = 'he'
+      JOIN charity_organization_translations cot2 ON cot2.charity_organization_id = dt.charity_organization_id AND cot2.locale = 'he'
+      WHERE rd.source_type = 'AdditionalDonation'
+      AND dt.charity_organization_id = '{COMPILE_CONTEXT.securityContext.charityOrganizationId}'
+      )
+
+    dimensions:
+      - name: donation_id
+        title: "Donation ID"
+        sql: donation_id
+        type: number
+        primary_key: true
+
+      - name: transfer_id
+        title: "Transfer ID"
+        sql: transfer_id
+        type: number
+
+      - name: created_at
+        title: "Created At"
+        sql: created_at
+        type: time
+
+      - name: completed_at
+        title: "Completed At"
+        sql: completed_at
+        type: time
+
+      - name: refunded_at
+        title: "Refunded At"
+        sql: refunded_at
+        type: time
+
+      - name: original_amount
+        title: "Original Amount"
+        sql: original_amount
+        type: number
+
+      - name: currency
+        title: "Currency"
+        sql: currency
+        type: string
+
+      - name: target_type
+        title: "Target Type"
+        sql: target_type
+        type: string
+
+      - name: norm_amount
+        title: "Normalized Amount"
+        sql: norm_amount
+        type: number
+
+      - name: released_amount
+        title: "Released Amount"
+        sql: released_amount
+        type: number
+
+      - name: recurring
+        title: "Recurring"
+        sql: recurring
+        type: boolean
+
+      - name: donation_source
+        title: "Donation Source"
+        sql: donation_source
+        type: string
+
+      - name: target_type
+        title: "Target Type"
+        sql: target_type
+        type: string
+
+      - name: unique_donation_id
+        title: "Unique Donation ID"
+        sql: unique_donation_id
+        type: string
+
+      - name: payment_method
+        title: "Payment Method"
+        sql: payment_method
+        type: string
+
+      - name: provider
+        title: "Provider"
+        sql: provider
+        type: string
+
+      - name: donor_email
+        title: "Donor Email"
+        sql: donor_email
+        type: string
+
+      - name: donor_name
+        title: "Donor Name"
+        sql: donor_name
+        type: string
+
+      - name: target_id
+        title: "Target ID"
+        sql: target_id
+        type: number
+
+      - name: campaign_name
+        title: "Campaign Name"
+        sql: campaign_name
+        type: string
+
+      - name: main_event_id
+        title: "Main Event ID"
+        sql: main_event_id
+        type: number
+
+      - name: campaign_id
+        title: "Campaign ID"
+        sql: campaign_id
+        type: number
+
+      - name: shagrir_name
+        title: "Shagrir Name"
+        sql: shagrir_name
+        type: string
+
+      - name: team_id
+        title: "Team ID"
+        sql: team_id
+        type: number
+
+      - name: team_name
+        title: "Team Name"
+        sql: team_name
+        type: string
+
+      - name: charity_organization_id
+        title: "Charity Organization ID"
+        sql: charity_organization_id
+        type: number
+
+      - name: charity_name
+        title: "Charity Name"
+        sql: charity_name
+        type: string
+        
+      - name: utm_source
+        title: "UTM Source"
+        sql: utm_source
+        type: string
+      
+      - name: utm_medium
+        title: "UTM Medium"
+        sql: utm_medium
+        type: string
+      
+      - name: utm_campaign
+        title: "UTM Campaign"
+        sql: utm_campaign
+        type: string
+
+    measures:
+      - name: count
+        type: count
+        title: '# of Donations'
+
+      - name: total_original_amount
+        title: 'Total Original Amount'
+        sql: original_amount
+        type: sum
+
+      - name: total_norm_amount
+        title: 'Total Normalized Amount'
+        sql: norm_amount
+        type: sum
+
+      - name: total_released_amount
+        title: 'Total Released Amount'
+        sql: released_amount
+        type: sum
+
+      - name: average_amount
+        title: 'Average Amount'
+        sql: norm_amount
+        type: avg
+
+      - name: min_amount
+        title: 'Minimum Amount'
+        sql: norm_amount
+        type: min
+
+      - name: max_amount
+        title: 'Maximum Amount'
+        sql: norm_amount
+        type: max
+
+      - name: distinct_donor_count
+        title: 'Distinct Donor Count'
+        sql: donor_email
+        type: count_distinct
+
+      - name: distinct_donation_count
+        title: 'Distinct Donation Count'
+        sql: unique_donation_id
+        type: count_distinct
+
+      - name: campaigns_count
+        title: 'Campaigns Count'
+        sql: campaign_id
+        type: count_distinct
+
+      - name: average_donation_per_donor
+        title: 'Average Donation Amount per Donor'
+        sql: norm_amount
+        type: avg
+        filters:
+          - sql: donor_email IS NOT NULL
+
+      - name: total_recurring_donations
+        title: 'Total Recurring Donations'
+        type: count
+        filters:
+          - sql: recurring = true
+
+      - name: total_one_time_donations
+        title: 'Total One-Time Donations'
+        type: count
+        filters:
+          - sql: recurring = false
+
+    #  - name: total_amount_by_payment_method
+    #    title: 'Total Amount by Payment Method'
+     #   sql: norm_amount
+     #   type: sum
+     #   dimensions:
+     #     - payment_method
+
+   #   - name: total_donations_by_campaign
+   #     title: 'Total Donations by Campaign'
+   #     type: count
+   #     dimensions:
+   #       - campaign_name
+
+      - name: average_processing_time
+        title: 'Average Processing Time'
+        sql: TIMESTAMPDIFF(SECOND, created_at, completed_at)
+        type: avg
+
+      - name: max_donation_amount
+        title: 'Maximum Donation Amount'
+        sql: norm_amount
+        type: max
+
+      - name: min_donation_amount
+        title: 'Minimum Donation Amount'
+        sql: norm_amount
+        type: min
+
+      - name: count_ils
+        title: 'Count of ILS Donations'
+        type: count
+        filters:
+          - sql: currency = 'ILS'
+
+      - name: count_usd
+        title: 'Count of USD Donations'
+        type: count
+        filters:
+          - sql: currency = 'USD'
+
+      - name: count_cad
+        title: 'Count of CAD Donations'
+        type: count
+        filters:
+          - sql: currency = 'CAD'
+
+      - name: count_gbp
+        title: 'Count of GBP Donations'
+        type: count
+        filters:
+          - sql: currency = 'GBP'
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started

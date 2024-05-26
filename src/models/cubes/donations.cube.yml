@@ -1,177 +1,197 @@
 cubes:
   - name: donations
     title: Donations
-    # sql_table: public.donations
-    data_source: staging-db # connect model to specific db connection
+    data_source: staging-db
 
     sql: >
-      select t.id                               as transfer_id,
-             d.id                               as donation_id,
-             d.norm_amount_cents / 100          as norm_amount,
-             da.amount_currency,
-             dtt.name                           as donation_target,
-             di.email                           as donor_email,
-             di.phone_number                    as donor_phone,
-             di.receive_updates_from_charities  as receive_updates,
-             da.released_at,
-             pm.name                            as payment_method,
-             pm.provider,
-             pm.redirected                      as through_jgive,
-             t.completed_at,
-             da.available_at,
-             da.is_negative,
-             da.payout_id,
-             da.market_fee_cents / 100.0        as market_fee,
-             da.processing_fee_cents / 100.0    as processing_fee,
-             da.transaction_fee_cents / 100.0   as transaction_fee,
-             da.releasable_amount_cents / 100.0 as releasable_amount
-      from donation_amounts da
-        join donation_targets dt on da.donation_target_id = dt.id
-        join donation_target_translations dtt on dt.id = dtt.donation_target_id and dtt.locale = 'en'
-        join charity_organizations co on dt.charity_organization_id = co.id
-        join donations d on da.payable_item_id = d.id and da.payable_item_type = 'Donation'
-        join payable_items_transfers pit on da.payable_item_id = pit.payable_item_id and pit.payable_item_type = 'Donation'
-        join transfers t on pit.transfer_id = t.id and t.completed_at is not null
-        join donor_infos di on d.id = di.donation_id
-        join payment_methods pm on da.payment_method_id = pm.id
-      where co.id = '{COMPILE_CONTEXT.securityContext.charityOrganizationId}' 
+      select distinct d.id as donation_id,
+        t.id as transfer_id,
+        d.created_at,
+        t.completed_at,
+        t.refunded_at,
+        d.amount_cents / 100 as original_amount,
+        d.amount_currency,
+        d.norm_amount_cents / 100 as norm_amount,
+        round((da.releasable_amount_cents / 100::float * (d.norm_amount_cents::float / d.amount_cents::float))::numeric, 2) as released_amount,
+        d.recurring,
+        pm.name as payment_method,
+        pm.provider,
+        d2.email as donor_email,
+        d2.full_name as donor_name,
+        dt.id as target_id,
+        case when dt.main_event_id is not null then met.name else dtt.name end as campaign_name,
+        dt.main_event_id,
+        case when dt.main_event_id is not null then split_part(dtt.name, '-', 1) else null end as shagrir_name,
+        dt.team_id,
+        team.name as team_name,
+        dt.charity_organization_id,
+        cot2.name as charity_name
+      from donations d
+      join payable_items_transfers pit on pit.payable_item_type = 'Donation' and pit.payable_item_id = d.id
+      join transfers t on pit.transfer_id = t.id
+      join donation_amounts da on da.payable_item_id = pit.payable_item_id and da.payable_item_type = 'Donation'
+      join payment_methods pm on t.payment_method_id = pm.id
+      join donors d2 on d.donor_id = d2.id
+      join donation_targets dt on d.recipient_id = dt.id
+      join donation_target_translations dtt on dtt.donation_target_id = dt.id and dtt.locale = 'he'
+      left join donation_target_translations met on met.donation_target_id = dt.main_event_id and met.locale = 'he'
+      left join donation_target_translations team on team.donation_target_id = dt.team_id and team.locale = 'he'
+      join charity_organization_translations cot2 on cot2.charity_organization_id = dt.charity_organization_id and cot2.locale = 'he'
+      where t.completed_at is not null
+      and dt.charity_organization_id = '{COMPILE_CONTEXT.securityContext.charityOrganizationId}'
 
     dimensions:
-      - name: charity_id
-        sql: charity_id
-        type: number
-
-      - name: amount_currency
-        title: "Amount currency"
-        sql: amount_currency
-        type: string
-
-      - name: donor_email
-        title: "Donor email"
-        sql: donor_email
-        type: string
-
-      - name: donor_phone
-        title: "Donor phone"
-        sql: donor_phone
-        type: string
-      
       - name: donation_id
         title: "Donation ID"
         sql: donation_id
         type: number
-
-      - name: donation_target
-        title: "Donation target"
-        sql: donation_target
-        type: string
-
-      - name: norm_amount
-        title: "Donation amount"
-        sql: norm_amount
-        type: number
-      
-      - name: payment_method
-        title: "Payment method"
-        sql: payment_method
-        type: string
-      
-      - name: provider
-        title: "Provider"
-        sql: provider
-        type: string
-
-      - name: through_jgive
-        title: "Through JGive"
-        sql: through_jgive
-        type: string
-
-      - name: released_at
-        title: "Released at"
-        sql: released_at
-        type: time
-
-      - name: completed_at
-        title: "Completed at"
-        sql: completed_at
-        type: time
-
-      - name: available_at
-        title: "Available at"
-        sql: available_at
-        type: time
-
-      - name: is_negative
-        title: "Is negative"
-        sql: is_negative
-        type: boolean
-
-      - name: payout_id
-        title: "Payout ID"
-        sql: payout_id
-        type: string
-
-      - name: market_fee
-        title: "Market fee"
-        sql: market_fee
-        type: number
-      
-      - name: processing_fee
-        title: "Processing fee"
-        sql: processing_fee
-        type: number
-
-      - name: transaction_fee
-        title: "Transaction fee"
-        sql: transaction_fee
-        type: number
-
-      - name: releasable_amount
-        title: "Releasable amount"
-        sql: releasable_amount
-        type: number
+        primary_key: true
 
       - name: transfer_id
         title: "Transfer ID"
         sql: transfer_id
         type: number
-        primary_key: true
+
+      - name: created_at
+        title: "Created At"
+        sql: created_at
+        type: time
+
+      - name: completed_at
+        title: "Completed At"
+        sql: completed_at
+        type: time
+
+      - name: refunded_at
+        title: "Refunded At"
+        sql: refunded_at
+        type: time
+
+      - name: original_amount
+        title: "Original Amount"
+        sql: original_amount
+        type: number
+
+      - name: amount_currency
+        title: "Amount Currency"
+        sql: amount_currency
+        type: string
+
+      - name: norm_amount
+        title: "Normalized Amount"
+        sql: norm_amount
+        type: number
+
+      - name: released_amount
+        title: "Released Amount"
+        sql: released_amount
+        type: number
+
+      - name: recurring
+        title: "Recurring"
+        sql: recurring
+        type: boolean
+
+      - name: payment_method
+        title: "Payment Method"
+        sql: payment_method
+        type: string
+
+      - name: provider
+        title: "Provider"
+        sql: provider
+        type: string
+
+      - name: donor_email
+        title: "Donor Email"
+        sql: donor_email
+        type: string
+
+      - name: donor_name
+        title: "Donor Name"
+        sql: donor_name
+        type: string
+
+      - name: target_id
+        title: "Target ID"
+        sql: target_id
+        type: number
+
+      - name: campaign_name
+        title: "Campaign Name"
+        sql: campaign_name
+        type: string
+
+      - name: main_event_id
+        title: "Main Event ID"
+        sql: main_event_id
+        type: number
+
+      - name: shagrir_name
+        title: "Shagrir Name"
+        sql: shagrir_name
+        type: string
+
+      - name: team_id
+        title: "Team ID"
+        sql: team_id
+        type: number
+
+      - name: team_name
+        title: "Team Name"
+        sql: team_name
+        type: string
+
+      - name: charity_organization_id
+        title: "Charity Organization ID"
+        sql: charity_organization_id
+        type: number
+
+      - name: charity_name
+        title: "Charity Name"
+        sql: charity_name
+        type: string
 
     measures:
       - name: count
         type: count
-        title: '# of donations'
+        title: '# of Donations'
 
-      - name: total_amount
-        title: 'Total amount'
+      - name: total_original_amount
+        title: 'Total Original Amount'
+        sql: original_amount
+        type: sum
+
+      - name: total_norm_amount
+        title: 'Total Normalized Amount'
         sql: norm_amount
         type: sum
 
-      - name: total_market_fee
-        title: 'Total market fee'
-        sql: market_fee
+      - name: total_released_amount
+        title: 'Total Released Amount'
+        sql: released_amount
         type: sum
 
-      - name: total_processing_fee
-        title: 'Total processing fee'
-        sql: processing_fee
-        type: sum
+      - name: average_amount
+        title: 'Average Amount'
+        sql: norm_amount
+        type: avg
 
-      - name: total_transaction_fee
-        title: 'Total transaction fee'
-        sql: transaction_fee
-        type: sum
+      - name: min_amount
+        title: 'Minimum Amount'
+        sql: norm_amount
+        type: min
 
-      - name: total_releasable_amount
-        title: 'Total releasable amount'
-        sql: releasable_amount
-        type: sum
+      - name: max_amount
+        title: 'Maximum Amount'
+        sql: norm_amount
+        type: max
 
-    # joins:
-    #   - name: orders # the name of the data model to join to (not the table)
-    #     sql: "{CUBE}.id = {orders}.customer_id"
-    #     relationship: one_to_many
+      - name: distinct_donor_count
+        title: 'Distinct Donor Count'
+        sql: donor_email
+        type: count_distinct
 
     pre_aggregations:
-    # Pre-aggregation definitions go here.
-    # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
